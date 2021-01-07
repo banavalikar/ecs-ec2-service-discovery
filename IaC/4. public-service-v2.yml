@@ -111,7 +111,7 @@ Resources:
           MemoryReservation: !Ref 'MemoryReservation'
           Image: !Ref 'ImageUrl'
           Environment:
-            - Name: APP_2
+            - Name: Unicorn
               Value: app2.dev.internal
           PortMappings:
             - ContainerPort: !Ref 'ContainerPort'

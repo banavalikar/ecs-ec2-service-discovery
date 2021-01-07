@@ -6,17 +6,17 @@ const agent = require('service-agent');
 
 // Constants
 const Port = process.env.Port || 8080;
-const App2 = process.env.APP_2;
+const Unicorn = process.env.Unicorn;
 
 // App
 const app = exp();
 app.get('/', (req, res) => {
-  return res.send(`Hello from App1`);
+  return res.send(`<h4>You can send Unicorn orders from here 💰. Add /buy-a-unicorn-from-app2 to the url to buy.</h4>`);
 });
 
-app.get('/send-get-to-app2', (req, res) => {
+app.get('/buy-a-unicorn-from-app2', (req, res) => {
 var options = { method: 'GET',
-  url: `http://${App2}`,
+  url: `http://${Unicorn}`,
   headers: 
    { 'cache-control': 'no-cache' } };
 
