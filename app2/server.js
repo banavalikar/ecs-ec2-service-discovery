@@ -9,7 +9,7 @@ const Port = process.env.Port || 8080;
 // App
 const app = express();
 app.get('/', (req, res) => {
-  return res.send(`Thanks for buying a Unicorn 🦄`);
+  return res.send(`<h1>Thanks for buying a Unicorn 🦄</h1>`);
 });
 
 app.listen(Port);
