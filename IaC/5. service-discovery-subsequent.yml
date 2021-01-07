@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create a service discovery name and namespace to be attached to an ECS service later.
+Parameters:
+  VpcStackName:
+    Type: String
+    Description: The name of the VPC stack that you created. Necessary
+                 to locate and reference resources created by that stack.
+    Default: vpc
+
+  ServiceName:
+    Type: String
+    Default: app2
+    Description: A name for the service
+
+  NamespaceStackName:
+    Type: String
+    Default: app1-sd
+    Description: A name for the service
+
+
+Resources:
+
+  # Service discovery name
+  DiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      Description: Discovery Service for the Demo Application
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: SRV
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: !Ref 'ServiceName' 
+      NamespaceId: 
+        Fn::ImportValue:
+          !Join [':', [!Ref 'NamespaceStackName', 'PrivateNamespaceID']]
+
+Outputs:
+
+  ServiceDiscoveryArn:
+    Description: The Service Discovery Arn
+    Value: !GetAtt DiscoveryService.Arn
+    Export:
+      Name: !Join [ ':', [ !Ref 'AWS::StackName', 'ServiceDiscoveryArn' ] ]
+
+

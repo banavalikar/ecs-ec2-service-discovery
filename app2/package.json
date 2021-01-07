@@ -1,0 +1,14 @@
+{
+    "name": "app2",
+    "version": "1.0.0",
+    "description": "Node.js on Docker",
+    "author": "Radhakrishna Banavalikar",
+    "main": "server.js",
+    "scripts": {
+      "start": "node server.js"
+    },
+    "dependencies": {
+      "express": "^4.16.1",
+      "request": "^2.88.2"
+    }
+  }

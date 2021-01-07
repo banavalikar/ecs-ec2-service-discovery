@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy a service into an ECS cluster behind a public load balancer.
+Parameters:
+  VpcStackName:
+    Type: String
+    Description: The name of the VPC stack that you created. Necessary
+                 to locate and reference resources created by that stack.
+    Default: vpc
+
+  ClusterStackName:
+    Type: String
+    Description: The name of the cluster stack that you created. Necessary
+                 to locate and reference resources created by that stack.
+    Default: ecs
+
+  ServiceDiscoveryStackName:
+    Type: String
+    Description: The name of the Service Discovery stack that you created. Necessary
+                 to locate and reference resources created by that stack.
+    Default: app2-sd
+
+  ServiceName:
+    Type: String
+    Description: A name for the service
+    Default: app2
+
+  ImageUrl:
+    Type: String
+    Default: accountid.dkr.ecr.eu-west-1.amazonaws.com/gateway/image:1.0
+    Description: The url of a docker image that contains the application process that
+                 will handle the traffic for this service
+  ContainerPort:
+    Type: Number
+    Default: 8080
+    Description: What port number the application inside the docker container is binding to
+
+  ContainerCpu:
+    Type: Number
+    Default: 512
+    Description: How much CPU to give the container. 1024 is 1 CPU
+
+  ContainerMemory:
+    Type: Number
+    Default: 512
+    Description: How much memory in megabytes to give the container
+
+  MemoryReservation:
+    Type: Number
+    Default: 256
+    Description: How much memory in megabytes is reserved for the container
+
+  Path:
+    Type: String
+    Default: "*"
+    Description: A path on the public load balancer that this service
+                 should be connected to. Use * to send all load balancer
+                 traffic to this service.
+
+  HealthCheckPath:
+    Type: String
+    Default: /
+    Description: A path on the public load balancer that should be used 
+                 to health check this service.
+
+
+  Priority:
+    Type: Number
+    Default: 1
+    Description: The priority for the routing rule added to the load balancer.
+                 This only applies if your have multiple services which have been
+                 assigned to different paths on the load balancer.
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: How many copies of the service task to run
+
+  Role:
+    Type: String
+    Default: ""
+    Description: (Optional) An IAM role to give the service's containers if the code within needs to
+                 access other AWS resources like S3 buckets, DynamoDB tables, etc
+
+Conditions:
+  HasCustomRole: !Not [ !Equals [!Ref 'Role', ''] ]
+
+Resources:
+  CloudwatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['-', [ECSLogGroup, !Ref 'AWS::StackName']]
+      RetentionInDays: 7
+
+  # The task definition. This is a simple metadata description of what
+  # container to run, and what resource requirements it has.
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: !Ref 'ContainerCpu'
+      Memory: !Ref 'ContainerMemory'
+      TaskRoleArn:
+        Fn::If:
+          - 'HasCustomRole'
+          - !Ref 'Role'
+          - !Ref "AWS::NoValue"
+      ContainerDefinitions:
+        - Name: !Ref 'ServiceName'
+          Essential: 'true'
+          Cpu: !Ref 'ContainerCpu'
+          MemoryReservation: !Ref 'MemoryReservation'
+          Image: !Ref 'ImageUrl'
+          PortMappings:
+            - ContainerPort: !Ref 'ContainerPort'
+          #Environment:
+          #  - Name: 
+          #    Value: 
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'CloudwatchLogsGroup'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Ref 'ServiceName'
+
+  # The service. The service is a resource which allows you to run multiple
+  # copies of a type of task, and gather up their logs and metrics, as well
+  # as monitor the number of running tasks and replace any that have crashed
+  service:
+    Type: AWS::ECS::Service
+    #DependsOn: LoadBalancerRule
+    Properties:
+      ServiceName: !Ref 'ServiceName'
+      Cluster:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'ClusterStackName', 'ClusterName']]
+      #DeploymentConfiguration:
+      #  MaximumPercent: 200
+      #  MinimumHealthyPercent: 75
+      DesiredCount: !Ref 'DesiredCount'
+      #Role: 
+      #  Fn::ImportValue:
+      #    !Join [':', [!Ref 'ClusterStackName', 'ECSRole']]
+      TaskDefinition: !Ref 'TaskDefinition'
+      #LoadBalancers:
+      #  - ContainerName: !Ref 'ServiceName'
+      #    ContainerPort: !Ref 'ContainerPort'
+      #    TargetGroupArn: !Ref 'TargetGroup'
+      ServiceRegistries:
+        - RegistryArn:
+            Fn::ImportValue:
+              !Join [':', [!Ref 'ServiceDiscoveryStackName', 'ServiceDiscoveryArn']]
+          ContainerPort: !Ref 'ContainerPort'
+          ContainerName: !Ref 'ServiceName'
+
+  ServiceScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: service
+    Properties:
+      MaxCapacity: 2
+      MinCapacity: 1
+      ResourceId: !Join ['', [service/, Fn::ImportValue: !Join [':', [!Ref 'ClusterStackName', 'ClusterName']], /, !GetAtt [service, Name]]]
+      RoleARN: 
+        Fn::ImportValue:
+          !Join [':', [!Ref 'ClusterStackName', 'AutoscalingRoleArn']]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ServiceScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: AStepPolicy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref 'ServiceScalingTarget'
+      StepScalingPolicyConfiguration:
+        AdjustmentType: PercentChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+        - MetricIntervalLowerBound: 0
+          ScalingAdjustment: 200
+
+  # A target group. This is used for keeping track of all the tasks, and
+  # what IP addresses / port numbers they have. You can query it yourself,
+  # to use the addresses yourself, but most often this target group is just
+  # connected to an application load balancer, or network load balancer, so
+  # it can automatically distribute traffic across all the targets.
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Name: !Ref 'ServiceName'
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'VpcStackName', 'VPCId']]
+
+  # Create a rule on the load balancer for routing traffic to the target group
+  #LoadBalancerRule:
+  #  Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #  Properties:
+  #    Actions:
+  #      - TargetGroupArn: !Ref 'TargetGroup'
+  #        Type: 'forward'
+  #    Conditions:
+  #      - Field: path-pattern
+  #        Values: [!Ref 'Path']
+  #    ListenerArn:
+  #      Fn::ImportValue:
+  #        !Join [':', [!Ref 'ClusterStackName', 'PublicListener']]
+  #    Priority: !Ref 'Priority'
