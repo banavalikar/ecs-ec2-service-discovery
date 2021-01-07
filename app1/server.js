@@ -30,6 +30,7 @@ request(options, function (error, response, body) {
   if (error) {
     return res.send(error.message);
   }
+  console.log('Calling ' + options.url);
   return res.send(body);
 });
 
